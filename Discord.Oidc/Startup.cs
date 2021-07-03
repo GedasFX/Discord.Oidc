@@ -1,16 +1,13 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
+using Discord.WebSocket;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.HttpsPolicy;
-using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Microsoft.OpenApi.Models;
 
 namespace Discord.Oidc
 {
@@ -26,27 +23,55 @@ namespace Discord.Oidc
         // This method gets called by the runtime. Use this method to add services to the container.
         public void ConfigureServices(IServiceCollection services)
         {
-            services.AddControllers();
-            services.AddSwaggerGen(c =>
+            services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+                .AddCookie(o =>
+                {
+                    o.ExpireTimeSpan = TimeSpan.FromDays(7);
+                    o.LoginPath = PathString.Empty;
+                })
+                .AddDiscord(options =>
+                    {
+                        options.ClientId = Configuration["DiscordAPI:ClientId"];
+                        options.ClientSecret = Configuration["DiscordAPI:ClientSecret"];
+                        options.SaveTokens = true;
+
+                        options.Scope.Add("guilds");
+
+                        options.Events.OnCreatingTicket = c =>
+                        {
+                            c.Identity.AddClaim(new Claim("discord", c.AccessToken));
+                            return Task.CompletedTask;
+                        };
+                    }
+                );
+            services.AddAuthorization();
+
+            services.AddHttpClient<DiscordApiHttpClient>();
+            services.AddSingleton<PkiService>();
+            services.AddSingleton(f =>
             {
-                c.SwaggerDoc("v1", new OpenApiInfo { Title = "Discord.Oidc", Version = "v1" });
+                var client = new DiscordSocketClient();
+
+                Task.Run(() =>
+                {
+                    client.LoginAsync(TokenType.Bot, Configuration["DiscordAPI:BotToken"]);
+                    client.StartAsync();
+                });
+
+                return client;
             });
+
+            services.AddMvcCore()
+                .AddDataAnnotations()
+                .AddJsonOptions(o => { o.JsonSerializerOptions.IgnoreNullValues = true; });
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
         {
-            if (env.IsDevelopment())
-            {
-                app.UseDeveloperExceptionPage();
-                app.UseSwagger();
-                app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Discord.Oidc v1"));
-            }
-
-            app.UseHttpsRedirection();
-
             app.UseRouting();
 
+            app.UseAuthentication();
             app.UseAuthorization();
 
             app.UseEndpoints(endpoints => { endpoints.MapControllers(); });

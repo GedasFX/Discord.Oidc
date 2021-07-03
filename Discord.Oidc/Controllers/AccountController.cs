@@ -1,8 +1,12 @@
 using System;
+using System.Globalization;
 using System.IdentityModel.Tokens.Jwt;
+using System.Linq;
 using System.Security.Claims;
+using System.Threading.Tasks;
 using AspNet.Security.OAuth.Discord;
 using Discord.WebSocket;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
@@ -12,38 +16,40 @@ namespace Discord.Oidc.Controllers
     public class AccountController : Controller
     {
         private readonly PkiService _pkiService;
-        private readonly DiscordSocketClient _discord;
+        private readonly DiscordApiHttpClient _api;
+        private readonly DiscordSocketClient _bot;
 
-        public AccountController(PkiService pkiService, DiscordSocketClient discord)
+        public AccountController(PkiService pkiService, DiscordApiHttpClient api, DiscordSocketClient bot)
         {
             _pkiService = pkiService;
-            _discord = discord;
+            _api = api;
+            _bot = bot;
         }
 
         [HttpGet("login")]
         [Authorize(AuthenticationSchemes = DiscordAuthenticationDefaults.AuthenticationScheme)]
-        public void LoginAsync()
+        public Task LoginAsync()
         {
+            // Signed in because of Authorize attribute
+            return Task.CompletedTask;
         }
 
-        [HttpPost("login/{guildId}")]
+        [HttpPost("token")]
         [Authorize]
-        public ActionResult<string> TokenAsync(ulong guildId)
+        public async Task<ActionResult<string>> TokenAsync()
         {
             var nameId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-            if (nameId == null || !ulong.TryParse(nameId, out var userId))
-                return Unauthorized();
 
-            // Check if user exists in a given guild
-            if (_discord.GetGuild(guildId)?.GetUser(userId) == null)
-                return Forbid();
+            var userGuilds = await _api.GetUserGuildsAsync(User.FindFirstValue("discord"));
+            var mutualGuilds = userGuilds.Where(userGuild =>
+                _bot.GetGuild(ulong.Parse(userGuild.Id, CultureInfo.InvariantCulture)) != null).ToList();
 
             var tokenHandler = new JwtSecurityTokenHandler();
             var token = tokenHandler.CreateToken(new SecurityTokenDescriptor
             {
                 Subject = new ClaimsIdentity(new Claim[]
                 {
-                    new("gid", guildId.ToString()),
+                    new("gid", string.Join(',', mutualGuilds)),
                     new("sub", nameId),
                     new("iss", $"{HttpContext.Request.Scheme}://{HttpContext.Request.Host.Value}"),
                     new("aud", "api"),
@@ -53,6 +59,11 @@ namespace Discord.Oidc.Controllers
             });
 
             return tokenHandler.WriteToken(token);
+        }
+
+        public async Task LogoutAsync()
+        {
+            await HttpContext.SignOutAsync();
         }
     }
 }

@@ -41,15 +41,16 @@ namespace Discord.Oidc.Controllers
             var nameId = User.FindFirstValue(ClaimTypes.NameIdentifier);
 
             var userGuilds = await _api.GetUserGuildsAsync(User.FindFirstValue("discord"));
-            var mutualGuilds = userGuilds.Where(userGuild =>
-                _bot.GetGuild(ulong.Parse(userGuild.Id, CultureInfo.InvariantCulture)) != null).ToList();
+            var mutualGuildIds = userGuilds
+                .Where(g => _bot.GetGuild(ulong.Parse(g.Id, CultureInfo.InvariantCulture)) != null)
+                .Select(g => g.Id);
 
             var tokenHandler = new JwtSecurityTokenHandler();
             var token = tokenHandler.CreateToken(new SecurityTokenDescriptor
             {
                 Subject = new ClaimsIdentity(new Claim[]
                 {
-                    new("gid", string.Join(',', mutualGuilds)),
+                    new("gid", string.Join(',', mutualGuildIds)),
                     new("sub", nameId),
                     new("iss", $"{HttpContext.Request.Scheme}://{HttpContext.Request.Host.Value}"),
                     new("aud", "api"),

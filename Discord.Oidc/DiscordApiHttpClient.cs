@@ -83,6 +83,8 @@ namespace Discord.Oidc
         [JsonPropertyName("premium_type")]
         public int? PremiumType { get; set; }
 
+        public IEnumerable<DiscordApiGuild>? Guilds { get; set; }
+
         public DiscordApiUser(string id, string username, string discriminator, string? avatar = null, bool? bot = null,
             bool? mfaEnabled = null, string? locale = null, bool? emailVerified = null, string? email = null,
             int? flags = null, int? premiumType = null)

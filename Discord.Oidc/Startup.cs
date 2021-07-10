@@ -1,11 +1,10 @@
-using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Discord.WebSocket;
-using Microsoft.AspNetCore.Authentication.Cookies;
+using IdentityModel;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -31,12 +30,18 @@ namespace Discord.Oidc
                 o.KnownProxies.Clear();
             });
 
-            services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-                .AddCookie(o =>
-                {
-                    o.ExpireTimeSpan = TimeSpan.FromDays(7);
-                    o.LoginPath = PathString.Empty;
-                })
+            services.AddIdentityServer(o => { o.UserInteraction.LoginUrl = "/login"; })
+                .AddInMemoryIdentityResources(OidcResources.IdentityResources)
+                .AddInMemoryApiResources(OidcResources.ApiResources)
+                .AddInMemoryApiScopes(OidcResources.ApiScopes)
+                .AddInMemoryClients(OidcResources.Clients(
+                    Configuration["OAuth:RedirectUris"],
+                    Configuration["OAuth:PostLogoutRedirectUris"],
+                    Configuration["OAuth:AllowedCorsOrigins"]))
+                .AddProfileService<DiscordProfileService>()
+                .AddDeveloperSigningCredential(filename: "token.rsa");
+
+            services.AddAuthentication()
                 .AddDiscord(options =>
                     {
                         options.ClientId = Configuration["DiscordAPI:ClientId"];
@@ -44,6 +49,8 @@ namespace Discord.Oidc
                         options.SaveTokens = true;
 
                         options.Scope.Add("guilds");
+
+                        options.ClaimActions.MapJsonKey(JwtClaimTypes.Subject, "id");
 
                         options.Events.OnCreatingTicket = c =>
                         {
@@ -55,8 +62,7 @@ namespace Discord.Oidc
             services.AddAuthorization();
 
             services.AddHttpClient<DiscordApiHttpClient>();
-            services.AddSingleton<PkiService>();
-            services.AddSingleton(f =>
+            services.AddSingleton(_ =>
             {
                 var client = new DiscordSocketClient();
 
@@ -81,7 +87,7 @@ namespace Discord.Oidc
 
             app.UseRouting();
 
-            app.UseAuthentication();
+            app.UseIdentityServer();
             app.UseAuthorization();
 
             app.UseEndpoints(endpoints => { endpoints.MapControllers(); });
